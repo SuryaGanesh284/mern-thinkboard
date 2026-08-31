@@ -22,7 +22,23 @@ export const getGeminiClient = () => {
   return aiClient;
 };
 
-const CANDIDATE_MODELS = ["gemini-flash-latest", "gemini-2.5-pro", "gemini-pro-latest"];
+const CANDIDATE_MODELS = [
+  "gemini-3.5-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-flash-latest",
+];
+
+const ACTION_PROMPTS = {
+  continue: "Continue writing smoothly from where this text left off. Maintain the same tone and context. Do not add conversational intro/outro.",
+  polish: "Improve the clarity, grammar, vocabulary, and flow of the following text while strictly preserving its original meaning. Return only the polished text.",
+  tone_executive: "Rewrite the following text into a high-impact, crisp executive summary suitable for leadership and managers. Use concise bullet points where appropriate.",
+  tone_casual: "Rewrite the following text in a friendly, conversational, and accessible tone while keeping all important information.",
+  tone_technical: "Rewrite the following text as structured, professional technical documentation / specifications with clear sections and precise terminology.",
+  extract_actions: "Extract all actionable tasks, to-dos, and next steps from the following text into an interactive Markdown checklist format (- [ ] Task description). Add priority tags like [High], [Medium], [Low] where applicable.",
+  summarize: "Provide a concise, high-value 2-4 bullet point summary (TL;DR) of the following text.",
+  key_takeaways: "Identify the core insights, key concepts, and takeaways from this note in structured bullet points.",
+};
 
 /**
  * Helper to stream content with model fallback on 503 errors
@@ -75,13 +91,22 @@ ${instruction}`.trim();
 };
 
 /**
- * Generate a smart, concise title for note content
+ * Generate a creative, descriptive, catchy title for note content
  */
 export const generateNoteTitle = async ({ content }) => {
   if (!content || !content.trim()) return "Untitled Note";
 
   const ai = getGeminiClient();
-  const prompt = `Analyze the following note content and generate a crisp, descriptive, professional title (maximum 4-6 words). Do not put quotes or punctuation around the title. Return ONLY the title text.\n\nContent:\n${content.substring(0, 1500)}`;
+  const prompt = `You are a creative copywriter and editor. Read the following note content and generate a single, highly creative, memorable, and descriptive title (2 to 5 words).
+Rules:
+1. Do NOT simply repeat or copy the first few words of the content.
+2. Capture the core theme, purpose, and essence creatively.
+3. Return ONLY the title text. Do NOT include quotes, asterisks, bullet points, or intros like "Here is a title".
+
+Note Content:
+"""
+${content.substring(0, 1500)}
+"""`;
 
   for (const model of CANDIDATE_MODELS) {
     try {
@@ -89,17 +114,17 @@ export const generateNoteTitle = async ({ content }) => {
         model,
         contents: prompt,
       });
-      const title = (res.text || "").trim().replace(/^["']|["']$/g, "");
-      if (title) return title;
+      let title = (res.text || "").trim();
+      // Remove any quotes, asterisks, markdown, or conversational preambles
+      title = title.replace(/^["'*#\s]+|["'*#\s]+$/g, "");
+      title = title.split("\n")[0].replace(/^(Title|Here is a title|Suggested title):\s*/i, "").trim();
+      if (title && title.length > 2) return title;
     } catch (e) {
       console.warn(`Model ${model} failed for title generation:`, e.message?.substring(0, 80));
     }
   }
 
-  // Smart heuristic fallback: extract first meaningful words
-  const firstLine = content.trim().split("\n")[0].replace(/^[#*\-=>\s]+/, "").trim();
-  const cleanTitle = firstLine.length > 35 ? firstLine.substring(0, 32) + "…" : firstLine;
-  return cleanTitle || "Untitled Note";
+  return "Insightful Note";
 };
 
 /**
