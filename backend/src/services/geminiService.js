@@ -78,13 +78,28 @@ ${instruction}`.trim();
  * Generate a smart, concise title for note content
  */
 export const generateNoteTitle = async ({ content }) => {
-  const ai = getGeminiClient();
-  const res = await ai.models.generateContent({
-    model: DEFAULT_MODEL,
-    contents: `Analyze the following note content and generate a crisp, descriptive, professional title (maximum 4-6 words). Do not put quotes or punctuation around the title. Return ONLY the title text.\n\nContent:\n${content.substring(0, 1500)}`,
-  });
+  if (!content || !content.trim()) return "Untitled Note";
 
-  return (res.text || "Untitled Note").trim().replace(/^["']|["']$/g, "");
+  const ai = getGeminiClient();
+  const prompt = `Analyze the following note content and generate a crisp, descriptive, professional title (maximum 4-6 words). Do not put quotes or punctuation around the title. Return ONLY the title text.\n\nContent:\n${content.substring(0, 1500)}`;
+
+  for (const model of CANDIDATE_MODELS) {
+    try {
+      const res = await ai.models.generateContent({
+        model,
+        contents: prompt,
+      });
+      const title = (res.text || "").trim().replace(/^["']|["']$/g, "");
+      if (title) return title;
+    } catch (e) {
+      console.warn(`Model ${model} failed for title generation:`, e.message?.substring(0, 80));
+    }
+  }
+
+  // Smart heuristic fallback: extract first meaningful words
+  const firstLine = content.trim().split("\n")[0].replace(/^[#*\-=>\s]+/, "").trim();
+  const cleanTitle = firstLine.length > 35 ? firstLine.substring(0, 32) + "…" : firstLine;
+  return cleanTitle || "Untitled Note";
 };
 
 /**
