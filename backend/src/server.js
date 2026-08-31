@@ -22,7 +22,8 @@ if (process.env.NODE_ENV !== "production") {
     })
   );
 }
-app.use(express.json()); // this middleware will parse JSON bodies: req.body
+app.use(express.json({ limit: "25mb" })); // allow larger payloads for audio recordings
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 app.use(rateLimiter);
 
 // our simple custom middleware

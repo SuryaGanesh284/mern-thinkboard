@@ -208,7 +208,7 @@ Requirements:
 1. Remove all filler words (e.g. "um", "uh", "you know", "like", "so basically", false starts, stutters).
 2. Fix run-on sentences and grammatical slips while strictly preserving the user's authentic ideas, opinions, and intent.
 3. Organize the thoughts into logical sections with clear Markdown headers (##, ###), clean bullet points, and bold emphasis where impactful.
-4. Generate a punchy, crisp title (3-6 words).
+4. Generate a punchy, crisp, creative title (3-6 words).
 5. Extract 2-4 smart category tags (e.g. ["Engineering", "Roadmap", "Design"]).
 6. If any actionable to-dos or commitments were mentioned, extract them into a checklist (- [ ] Task).
 
@@ -220,9 +220,28 @@ Return your response strictly in the following JSON format:
   "actionItems": ["Action item 1", "Action item 2"]
 }`;
 
-  let promptContents;
-  if (audioBase64) {
-    promptContents = [
+  let resText = "";
+
+  // 1. If we have raw transcript from browser speech recognition, process it directly with text for highest speed and precision
+  if (rawTranscript && rawTranscript.trim()) {
+    const textPrompt = `${instructions}\n\nSpoken Voice Transcript:\n"""\n${rawTranscript}\n"""`;
+    for (const model of CANDIDATE_MODELS) {
+      try {
+        const res = await ai.models.generateContent({
+          model,
+          contents: textPrompt,
+        });
+        resText = res.text || "";
+        if (resText) break;
+      } catch (e) {
+        console.warn(`Model ${model} failed for voice text:`, e.message?.substring(0, 80));
+      }
+    }
+  }
+
+  // 2. If audioBase64 is provided and we still don't have text, use multimodal audio input
+  if (!resText && audioBase64) {
+    const audioPrompt = [
       {
         inlineData: {
           mimeType,
@@ -231,37 +250,42 @@ Return your response strictly in the following JSON format:
       },
       instructions,
     ];
-  } else {
-    promptContents = `${instructions}\n\nSpoken Transcript:\n"""\n${rawTranscript}\n"""`;
-  }
-
-  let resText = "";
-  for (const model of CANDIDATE_MODELS) {
-    try {
-      const res = await ai.models.generateContent({
-        model,
-        contents: promptContents,
-      });
-      resText = res.text || "";
-      if (resText) break;
-    } catch (e) {
-      console.warn(`Model ${model} failed for voice memo:`, e.message?.substring(0, 80));
+    for (const model of CANDIDATE_MODELS) {
+      try {
+        const res = await ai.models.generateContent({
+          model,
+          contents: audioPrompt,
+        });
+        resText = res.text || "";
+        if (resText) break;
+      } catch (e) {
+        console.warn(`Model ${model} failed for audio input:`, e.message?.substring(0, 80));
+      }
     }
   }
 
   // Parse JSON response
   try {
     const cleaned = resText.replace(/```json/gi, "").replace(/```/g, "").trim();
-    return JSON.parse(cleaned);
+    const parsed = JSON.parse(cleaned);
+    if (parsed && (parsed.title || parsed.content)) {
+      return {
+        title: parsed.title || "Spoken Thoughts",
+        content: parsed.content || rawTranscript,
+        tags: parsed.tags || ["Voice Note"],
+        actionItems: parsed.actionItems || [],
+      };
+    }
   } catch (err) {
-    console.warn("Failed to parse voice memo JSON, fallback to raw text:", err.message);
-    return {
-      title: "Voice Brain Dump",
-      content: resText || rawTranscript,
-      tags: ["Voice Memo"],
-      actionItems: [],
-    };
+    console.warn("Failed to parse voice memo JSON, fallback:", err.message);
   }
+
+  return {
+    title: rawTranscript ? "Spoken Thoughts" : "Voice Brain Dump",
+    content: resText || rawTranscript || "Voice memo captured.",
+    tags: ["Voice Note", "Thoughts"],
+    actionItems: [],
+  };
 };
 
 /**
