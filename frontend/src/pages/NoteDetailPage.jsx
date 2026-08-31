@@ -7,6 +7,7 @@ import { ArrowLeftIcon, LoaderIcon, Trash2Icon } from "lucide-react";
 import AICopilot from "../components/AICopilot";
 import AITitleButton from "../components/AITitleButton";
 import RelatedNotes from "../components/RelatedNotes";
+import MermaidDiagram from "../components/MermaidDiagram";
 
 const NoteDetailPage = () => {
   const [note, setNote] = useState(null);
@@ -144,6 +145,18 @@ const NoteDetailPage = () => {
               </div>
             </div>
           </div>
+
+          {/* AI Visual Mindmap & Architecture Diagram */}
+          <MermaidDiagram
+            noteTitle={note.title}
+            noteContent={note.content}
+            onInsertToNote={(mermaidBlock) =>
+              setNote({
+                ...note,
+                content: note.content ? `${note.content}\n${mermaidBlock}` : mermaidBlock,
+              })
+            }
+          />
 
           {/* AI-Connected Related Thoughts & Knowledge Graph */}
           <RelatedNotes noteId={id} />

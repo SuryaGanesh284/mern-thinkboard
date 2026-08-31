@@ -248,5 +248,52 @@ Return only the short sentence.`;
   return "Connected by related concepts and shared themes.";
 };
 
+/**
+ * Generate Visual Mindmaps / Flowcharts in Mermaid.js syntax from note content
+ */
+export const generateDiagram = async ({ content, title = "", diagramType = "auto" }) => {
+  const ai = getGeminiClient();
+
+  const prompt = `You are an expert systems visualizer and Mermaid.js diagram architect.
+Analyze the following note and generate a clean, visually clear, and accurate Mermaid.js diagram.
+
+Requirements:
+1. Diagram type preference: ${diagramType === "auto" ? "Choose the best fit (mindmap for concepts/ideas, graph TD for architectures/processes, sequenceDiagram for interactions)" : diagramType}.
+2. Ensure strict, valid Mermaid syntax. Do not invent custom keywords.
+3. For flowcharts, use "graph TD" with clear descriptive node labels: id["Label Text"].
+4. For mindmaps, use valid "mindmap" syntax with proper root and nested indentation.
+5. Do NOT include Markdown code blocks (e.g. do NOT write \`\`\`mermaid or \`\`\`). Return ONLY the pure Mermaid code.
+
+Note Title: "${title}"
+Note Content:
+"""
+${content.substring(0, 3000)}
+"""`;
+
+  for (const model of CANDIDATE_MODELS) {
+    try {
+      const res = await ai.models.generateContent({
+        model,
+        contents: prompt,
+      });
+      let code = (res.text || "").trim();
+      // Remove any accidental markdown backticks
+      code = code.replace(/```mermaid/gi, "").replace(/```/g, "").trim();
+      if (code) {
+        return { mermaidCode: code, diagramType };
+      }
+    } catch (e) {
+      console.warn(`Model ${model} failed for diagram generation:`, e.message?.substring(0, 80));
+    }
+  }
+
+  // Fallback mindmap
+  return {
+    mermaidCode: `mindmap\n  root(("${title || "Note"}"))\n    Key Concepts\n      Ideas\n      Implementation\n    Next Steps\n      Action Items`,
+    diagramType: "mindmap",
+  };
+};
+
+
 
 

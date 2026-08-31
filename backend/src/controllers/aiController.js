@@ -7,6 +7,7 @@ import {
   askSecondBrain,
   processVoiceMemo,
   explainConnection,
+  generateDiagram,
 } from "../services/geminiService.js";
 
 /**
@@ -347,6 +348,31 @@ export const getKnowledgeGraph = async (req, res) => {
     res.status(500).json({ error: error.message || "Failed to generate knowledge graph" });
   }
 };
+
+/**
+ * Generate Visual Mindmaps / Flowcharts in Mermaid format
+ */
+export const createDiagram = async (req, res) => {
+  const { content, title, diagramType } = req.body;
+
+  if (!content || !content.trim()) {
+    return res.status(400).json({ error: "Content is required to generate a diagram" });
+  }
+
+  try {
+    const result = await generateDiagram({
+      content,
+      title,
+      diagramType: diagramType || "auto",
+    });
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Diagram generation error:", error);
+    res.status(500).json({ error: error.message || "Failed to generate diagram" });
+  }
+};
+
 
 
 

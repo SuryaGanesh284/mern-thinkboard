@@ -6,6 +6,7 @@ import api from "../lib/axios";
 import AICopilot from "../components/AICopilot";
 import AITitleButton from "../components/AITitleButton";
 import VoiceRecorder from "../components/VoiceRecorder";
+import MermaidDiagram from "../components/MermaidDiagram";
 
 const CreatePage = () => {
   const [title, setTitle] = useState("");
@@ -110,6 +111,15 @@ const CreatePage = () => {
                     className="textarea textarea-bordered h-44 font-sans text-base leading-relaxed"
                     value={content}
                     onChange={(e) => setContent(e.target.value)}
+                  />
+
+                  {/* AI Mindmap & Diagram Generator */}
+                  <MermaidDiagram
+                    noteTitle={title}
+                    noteContent={content}
+                    onInsertToNote={(mermaidBlock) =>
+                      setContent((prev) => (prev ? `${prev}\n${mermaidBlock}` : mermaidBlock))
+                    }
                   />
                 </div>
 
