@@ -6,6 +6,7 @@ import {
   cosineSimilarity,
   askSecondBrain,
   processVoiceMemo,
+  explainConnection,
 } from "../services/geminiService.js";
 
 /**
@@ -228,6 +229,125 @@ export const syncEmbeddings = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+/**
+ * Get Semantically Related Notes for a specific note ID + AI explanations
+ */
+export const getRelatedNotes = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const currentNote = await Note.findById(id);
+    if (!currentNote) {
+      return res.status(404).json({ error: "Note not found" });
+    }
+
+    let currentEmbedding = currentNote.embedding;
+    if (!currentEmbedding || currentEmbedding.length === 0) {
+      currentEmbedding = await getEmbedding(`${currentNote.title}\n\n${currentNote.content}`);
+      currentNote.embedding = currentEmbedding;
+      await currentNote.save().catch(() => {});
+    }
+
+    const allNotes = await Note.find({ _id: { $ne: id } });
+    const scored = [];
+
+    for (const note of allNotes) {
+      let embedding = note.embedding;
+      if (!embedding || embedding.length === 0) {
+        embedding = await getEmbedding(`${note.title}\n\n${note.content}`);
+        note.embedding = embedding;
+        await note.save().catch(() => {});
+      }
+
+      const score = cosineSimilarity(currentEmbedding, embedding);
+      if (score > 0.35) {
+        scored.push({
+          _id: note._id,
+          title: note.title,
+          content: note.content,
+          similarity: Math.round(score * 100),
+          createdAt: note.createdAt,
+        });
+      }
+    }
+
+    scored.sort((a, b) => b.similarity - a.similarity);
+    const topRelated = scored.slice(0, 3);
+
+    // Generate quick connection explanation for top related note if available
+    const enrichedResults = await Promise.all(
+      topRelated.map(async (related) => {
+        let reason = "";
+        try {
+          reason = await explainConnection(currentNote, related);
+        } catch {
+          reason = "Related by contextual and semantic similarity.";
+        }
+        return {
+          ...related,
+          reason,
+        };
+      })
+    );
+
+    res.status(200).json({ relatedNotes: enrichedResults });
+  } catch (error) {
+    console.error("Get related notes error:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch related notes" });
+  }
+};
+
+/**
+ * Generate 2D Knowledge Graph nodes and semantic similarity links
+ */
+export const getKnowledgeGraph = async (req, res) => {
+  try {
+    const notes = await Note.find();
+    if (notes.length === 0) {
+      return res.status(200).json({ nodes: [], links: [] });
+    }
+
+    // Ensure embeddings exist
+    for (const note of notes) {
+      if (!note.embedding || note.embedding.length === 0) {
+        note.embedding = await getEmbedding(`${note.title}\n\n${note.content}`);
+        await note.save().catch(() => {});
+      }
+    }
+
+    const nodes = notes.map((n, index) => ({
+      id: String(n._id),
+      title: n.title,
+      preview: n.content.substring(0, 80),
+      createdAt: n.createdAt,
+      group: (index % 5) + 1,
+    }));
+
+    const links = [];
+    // Compute pairwise similarity
+    for (let i = 0; i < notes.length; i++) {
+      for (let j = i + 1; j < notes.length; j++) {
+        const score = cosineSimilarity(notes[i].embedding, notes[j].embedding);
+        // Link notes if similarity is high enough
+        if (score > 0.45) {
+          links.push({
+            source: String(notes[i]._id),
+            target: String(notes[j]._id),
+            similarity: Math.round(score * 100),
+            value: Math.max(1, Math.round((score - 0.45) * 10)),
+          });
+        }
+      }
+    }
+
+    res.status(200).json({ nodes, links });
+  } catch (error) {
+    console.error("Knowledge graph error:", error);
+    res.status(500).json({ error: error.message || "Failed to generate knowledge graph" });
+  }
+};
+
 
 
 

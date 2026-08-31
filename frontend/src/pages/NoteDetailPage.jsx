@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import { ArrowLeftIcon, LoaderIcon, Trash2Icon } from "lucide-react";
 import AICopilot from "../components/AICopilot";
 import AITitleButton from "../components/AITitleButton";
+import RelatedNotes from "../components/RelatedNotes";
 
 const NoteDetailPage = () => {
   const [note, setNote] = useState(null);
@@ -143,6 +144,9 @@ const NoteDetailPage = () => {
               </div>
             </div>
           </div>
+
+          {/* AI-Connected Related Thoughts & Knowledge Graph */}
+          <RelatedNotes noteId={id} />
         </div>
       </div>
     </div>

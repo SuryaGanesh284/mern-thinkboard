@@ -224,4 +224,29 @@ Return your response strictly in the following JSON format:
   }
 };
 
+/**
+ * Explain the semantic connection between two related notes
+ */
+export const explainConnection = async (noteA, noteB) => {
+  const ai = getGeminiClient();
+  const prompt = `Explain in one short, punchy sentence (maximum 12 words) why these two notes are conceptually connected.
+Note 1: "${noteA.title}" - ${noteA.content.substring(0, 200)}
+Note 2: "${noteB.title}" - ${noteB.content.substring(0, 200)}
+Return only the short sentence.`;
+
+  for (const model of CANDIDATE_MODELS) {
+    try {
+      const res = await ai.models.generateContent({
+        model,
+        contents: prompt,
+      });
+      return (res.text || "").trim().replace(/^["']|["']$/g, "");
+    } catch {
+      // fallback
+    }
+  }
+  return "Connected by related concepts and shared themes.";
+};
+
+
 
