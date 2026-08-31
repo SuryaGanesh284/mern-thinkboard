@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router";
 import api from "../lib/axios";
 import AICopilot from "../components/AICopilot";
 import AITitleButton from "../components/AITitleButton";
+import VoiceRecorder from "../components/VoiceRecorder";
 
 const CreatePage = () => {
   const [title, setTitle] = useState("");
@@ -56,7 +57,18 @@ const CreatePage = () => {
 
           <div className="card bg-base-100">
             <div className="card-body">
-              <h2 className="card-title text-2xl mb-4">Create New Note</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="card-title text-2xl">Create New Note</h2>
+              </div>
+
+              {/* Voice Brain Dump Component */}
+              <VoiceRecorder
+                onApplyVoiceNote={({ title: newTitle, content: newContent }) => {
+                  if (newTitle) setTitle(newTitle);
+                  if (newContent) setContent(newContent);
+                }}
+              />
+
               <form onSubmit={handleSubmit}>
                 <div className="form-control mb-4">
                   <div className="flex items-center justify-between mb-1">

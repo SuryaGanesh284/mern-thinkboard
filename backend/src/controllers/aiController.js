@@ -5,6 +5,7 @@ import {
   getEmbedding,
   cosineSimilarity,
   askSecondBrain,
+  processVoiceMemo,
 } from "../services/geminiService.js";
 
 /**
@@ -181,6 +182,30 @@ export const askBrain = async (req, res) => {
 };
 
 /**
+ * Process Voice Memo / Speech Dump into Clean Structured Note
+ */
+export const transcribeVoice = async (req, res) => {
+  const { audioBase64, mimeType, rawTranscript } = req.body;
+
+  if (!audioBase64 && (!rawTranscript || !rawTranscript.trim())) {
+    return res.status(400).json({ error: "Either audioBase64 or rawTranscript is required" });
+  }
+
+  try {
+    const structuredResult = await processVoiceMemo({
+      audioBase64,
+      mimeType,
+      rawTranscript,
+    });
+
+    res.status(200).json(structuredResult);
+  } catch (error) {
+    console.error("Transcribe voice error:", error);
+    res.status(500).json({ error: error.message || "Failed to process voice memo" });
+  }
+};
+
+/**
  * Sync / Backfill embeddings for all existing notes
  */
 export const syncEmbeddings = async (req, res) => {
@@ -203,4 +228,6 @@ export const syncEmbeddings = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+
 

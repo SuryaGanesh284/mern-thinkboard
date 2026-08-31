@@ -155,3 +155,73 @@ ${question}`.trim();
   await generateStreamWithFallback(ai, promptContent, onChunk);
 };
 
+/**
+ * Process Voice Memo / Speech Dump into Clean Structured Note (AudioPen / Granola style)
+ */
+export const processVoiceMemo = async ({ audioBase64, mimeType = "audio/webm", rawTranscript = "" }) => {
+  const ai = getGeminiClient();
+
+  const instructions = `You are an expert executive thought organizer and note structuring specialist (similar to AudioPen and Granola).
+Your task is to take this spoken voice memo / brain dump and transform it into a beautifully structured, highly readable personal note.
+
+Requirements:
+1. Remove all filler words (e.g. "um", "uh", "you know", "like", "so basically", false starts, stutters).
+2. Fix run-on sentences and grammatical slips while strictly preserving the user's authentic ideas, opinions, and intent.
+3. Organize the thoughts into logical sections with clear Markdown headers (##, ###), clean bullet points, and bold emphasis where impactful.
+4. Generate a punchy, crisp title (3-6 words).
+5. Extract 2-4 smart category tags (e.g. ["Engineering", "Roadmap", "Design"]).
+6. If any actionable to-dos or commitments were mentioned, extract them into a checklist (- [ ] Task).
+
+Return your response strictly in the following JSON format:
+{
+  "title": "Concise Descriptive Title",
+  "content": "The full polished note in structured Markdown format...",
+  "tags": ["Tag1", "Tag2"],
+  "actionItems": ["Action item 1", "Action item 2"]
+}`;
+
+  let promptContents;
+  if (audioBase64) {
+    promptContents = [
+      {
+        inlineData: {
+          mimeType,
+          data: audioBase64,
+        },
+      },
+      instructions,
+    ];
+  } else {
+    promptContents = `${instructions}\n\nSpoken Transcript:\n"""\n${rawTranscript}\n"""`;
+  }
+
+  let resText = "";
+  for (const model of CANDIDATE_MODELS) {
+    try {
+      const res = await ai.models.generateContent({
+        model,
+        contents: promptContents,
+      });
+      resText = res.text || "";
+      if (resText) break;
+    } catch (e) {
+      console.warn(`Model ${model} failed for voice memo:`, e.message?.substring(0, 80));
+    }
+  }
+
+  // Parse JSON response
+  try {
+    const cleaned = resText.replace(/```json/gi, "").replace(/```/g, "").trim();
+    return JSON.parse(cleaned);
+  } catch (err) {
+    console.warn("Failed to parse voice memo JSON, fallback to raw text:", err.message);
+    return {
+      title: "Voice Brain Dump",
+      content: resText || rawTranscript,
+      tags: ["Voice Memo"],
+      actionItems: [],
+    };
+  }
+};
+
+
