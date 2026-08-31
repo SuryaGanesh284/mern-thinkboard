@@ -22,17 +22,33 @@ export const getGeminiClient = () => {
   return aiClient;
 };
 
-const DEFAULT_MODEL = "gemini-flash-latest";
+const CANDIDATE_MODELS = ["gemini-flash-latest", "gemini-2.5-pro", "gemini-pro-latest"];
 
-const ACTION_PROMPTS = {
-  continue: "Continue writing smoothly from where this text left off. Maintain the same tone and context. Do not add conversational intro/outro.",
-  polish: "Improve the clarity, grammar, vocabulary, and flow of the following text while strictly preserving its original meaning. Return only the polished text.",
-  tone_executive: "Rewrite the following text into a high-impact, crisp executive summary suitable for leadership and managers. Use concise bullet points where appropriate.",
-  tone_casual: "Rewrite the following text in a friendly, conversational, and accessible tone while keeping all important information.",
-  tone_technical: "Rewrite the following text as structured, professional technical documentation / specifications with clear sections and precise terminology.",
-  extract_actions: "Extract all actionable tasks, to-dos, and next steps from the following text into an interactive Markdown checklist format (- [ ] Task description). Add priority tags like [High], [Medium], [Low] where applicable.",
-  summarize: "Provide a concise, high-value 2-4 bullet point summary (TL;DR) of the following text.",
-  key_takeaways: "Identify the core insights, key concepts, and takeaways from this note in structured bullet points.",
+/**
+ * Helper to stream content with model fallback on 503 errors
+ */
+const generateStreamWithFallback = async (ai, promptContent, onChunk) => {
+  let lastError = null;
+  for (const model of CANDIDATE_MODELS) {
+    try {
+      const responseStream = await ai.models.generateContentStream({
+        model,
+        contents: promptContent,
+      });
+
+      for await (const chunk of responseStream) {
+        const textChunk = chunk.text;
+        if (textChunk) {
+          onChunk(textChunk);
+        }
+      }
+      return; // Succeeded!
+    } catch (err) {
+      console.warn(`Model ${model} stream error (${err.message?.substring(0, 80)}), trying next candidate...`);
+      lastError = err;
+    }
+  }
+  throw lastError || new Error("All AI models failed to respond");
 };
 
 /**
@@ -47,31 +63,15 @@ export const streamAIText = async ({ text = "", action = "continue", customPromp
     instruction = `Perform the following instruction on the provided note text: "${customPrompt}". Return only the resulting text without conversational preambles.`;
   }
 
-  const systemInstruction = `You are ThinkBoard AI, an elite, context-aware writing copilot and knowledge assistant integrated into a modern note-taking app.
-Always output clean, high quality text or Markdown. Never output conversational filler such as "Sure, here is your note:" or "Here you go:". Start directly with the content.`;
+  const promptContent = `You are ThinkBoard AI, an elite, context-aware writing copilot integrated into a note-taking app.
+Always output clean, high quality text or Markdown directly. Never output conversational filler.
 
-  const promptContent = `
-[Note Context]
 ${noteTitle ? `Note Title: ${noteTitle}\n` : ""}${text ? `Current Note Content:\n"""\n${text}\n"""` : "(Empty note)"}
 
-[Task Instruction]
-${instruction}
-`.trim();
+Task Instruction:
+${instruction}`.trim();
 
-  const responseStream = await ai.models.generateContentStream({
-    model: DEFAULT_MODEL,
-    contents: promptContent,
-    config: {
-      systemInstruction,
-    },
-  });
-
-  for await (const chunk of responseStream) {
-    const textChunk = chunk.text;
-    if (textChunk) {
-      onChunk(textChunk);
-    }
-  }
+  await generateStreamWithFallback(ai, promptContent, onChunk);
 };
 
 /**
@@ -86,3 +86,72 @@ export const generateNoteTitle = async ({ content }) => {
 
   return (res.text || "Untitled Note").trim().replace(/^["']|["']$/g, "");
 };
+
+/**
+ * Generate 3072-dimensional vector embedding for text
+ */
+export const getEmbedding = async (text) => {
+  if (!text || !text.trim()) return [];
+  const ai = getGeminiClient();
+  try {
+    const res = await ai.models.embedContent({
+      model: "gemini-embedding-001",
+      contents: text.substring(0, 4000),
+    });
+    return res.embeddings?.[0]?.values || [];
+  } catch (error) {
+    console.error("Embedding generation error:", error);
+    return [];
+  }
+};
+
+/**
+ * Calculate Cosine Similarity between two numeric vectors
+ */
+export const cosineSimilarity = (vecA, vecB) => {
+  if (!vecA?.length || !vecB?.length || vecA.length !== vecB.length) return 0;
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+};
+
+/**
+ * Ask Your Second Brain (RAG Engine with Citations)
+ */
+export const askSecondBrain = async ({ question, relevantNotes, onChunk }) => {
+  const ai = getGeminiClient();
+
+  const contextBlocks = relevantNotes
+    .map(
+      (n, i) => `[Source Note #${i + 1}]
+Note ID: ${n._id}
+Title: ${n.title}
+Content:
+${n.content}
+`
+    )
+    .join("\n---\n");
+
+  const promptContent = `You are ThinkBoard's Second Brain AI.
+Answer the user's question accurately using ONLY the information provided in the user's personal notes below.
+Guidelines:
+1. Synthesize insights clearly with structured Markdown and concise bullet points.
+2. Whenever you mention or derive a fact from a specific note, cite it inline like **[Source: Note Title]**.
+3. If the user's notes do not contain the answer, politely state that you couldn't find it in their notes.
+
+[User's Personal Notes Knowledge Base]
+${contextBlocks || "(No notes found in knowledge base)"}
+
+[User Question]
+${question}`.trim();
+
+  await generateStreamWithFallback(ai, promptContent, onChunk);
+};
+

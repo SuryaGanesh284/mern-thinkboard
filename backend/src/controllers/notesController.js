@@ -1,4 +1,5 @@
 import Note from "../models/Note.js";
+import { getEmbedding } from "../services/geminiService.js";
 
 export async function getAllNotes(_, res) {
   try {
@@ -24,8 +25,16 @@ export async function getNoteById(req, res) {
 export async function createNote(req, res) {
   try {
     const { title, content } = req.body;
-    const note = new Note({ title, content });
 
+    // Generate vector embedding in background or immediately
+    let embedding = [];
+    try {
+      embedding = await getEmbedding(`${title}\n\n${content}`);
+    } catch (e) {
+      console.warn("Could not generate embedding for new note:", e.message);
+    }
+
+    const note = new Note({ title, content, embedding });
     const savedNote = await note.save();
     res.status(201).json(savedNote);
   } catch (error) {
@@ -37,9 +46,22 @@ export async function createNote(req, res) {
 export async function updateNote(req, res) {
   try {
     const { title, content } = req.body;
+
+    let embedding = [];
+    try {
+      embedding = await getEmbedding(`${title}\n\n${content}`);
+    } catch (e) {
+      console.warn("Could not generate embedding for updated note:", e.message);
+    }
+
+    const updateData = { title, content };
+    if (embedding.length > 0) {
+      updateData.embedding = embedding;
+    }
+
     const updatedNote = await Note.findByIdAndUpdate(
       req.params.id,
-      { title, content },
+      updateData,
       {
         new: true,
       }

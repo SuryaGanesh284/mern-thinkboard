@@ -13,6 +13,18 @@ const noteSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    tags: {
+      type: [String],
+      default: [],
+    },
+    summary: {
+      type: String,
+      default: "",
+    },
+    embedding: {
+      type: [Number],
+      default: [],
+    },
   },
   { timestamps: true } // createdAt, updatedAt
 );
