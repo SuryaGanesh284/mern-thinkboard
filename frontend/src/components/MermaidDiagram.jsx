@@ -14,23 +14,33 @@ import {
 import toast from "react-hot-toast";
 import api from "../lib/axios";
 
-// Initialize mermaid with dark/cyber styling
+// Initialize mermaid with high-contrast cyber theme
 mermaid.initialize({
   startOnLoad: false,
   theme: "dark",
   securityLevel: "loose",
-  fontFamily: "monospace",
+  fontFamily: "ui-sans-serif, system-ui, sans-serif",
   themeVariables: {
     darkMode: true,
-    primaryColor: "#00FF9D",
-    primaryTextColor: "#000000",
-    primaryBorderColor: "#00FF9D",
-    lineColor: "#38BDF8",
-    secondaryColor: "#1E293B",
-    tertiaryColor: "#0F172A",
-    background: "#0F172A",
-    noteBkgColor: "#1E293B",
-    noteTextColor: "#F8FAFC",
+    background: "#0f172a",
+    primaryColor: "#1e293b",
+    primaryTextColor: "#ffffff",
+    primaryBorderColor: "#00ff9d",
+    lineColor: "#38bdf8",
+    secondaryColor: "#334155",
+    secondaryTextColor: "#ffffff",
+    secondaryBorderColor: "#38bdf8",
+    tertiaryColor: "#0f172a",
+    tertiaryTextColor: "#ffffff",
+    tertiaryBorderColor: "#a855f7",
+    textColor: "#ffffff",
+    mainBkg: "#1e293b",
+    nodeBorder: "#00ff9d",
+    nodeTextColor: "#ffffff",
+    titleColor: "#00ff9d",
+    edgeLabelBackground: "#0f172a",
+    mindmapTextColor: "#ffffff",
+    gitBranchLabel0: "#ffffff",
   },
 });
 
@@ -184,7 +194,27 @@ const MermaidDiagram = ({ noteTitle = "", noteContent = "", onInsertToNote }) =>
           </div>
 
           {/* Diagram Display Card */}
-          <div className="rounded-xl bg-[#0b0f19] border border-base-content/10 p-6 min-h-[220px] flex items-center justify-center overflow-x-auto shadow-inner relative">
+          <div className="rounded-xl bg-[#0b0f19] border border-base-content/10 p-6 min-h-[240px] flex items-center justify-center overflow-x-auto shadow-inner relative">
+            <style>{`
+              .mermaid-diagram-viewer svg text,
+              .mermaid-diagram-viewer svg tspan,
+              .mermaid-diagram-viewer svg .nodeLabel,
+              .mermaid-diagram-viewer svg .labelText,
+              .mermaid-diagram-viewer svg .mindmap-node text,
+              .mermaid-diagram-viewer svg .sectionTitleText,
+              .mermaid-diagram-viewer svg .taskText {
+                fill: #ffffff !important;
+                color: #ffffff !important;
+                font-family: inherit !important;
+                font-weight: 500 !important;
+              }
+              .mermaid-diagram-viewer svg .mindmap-node rect,
+              .mermaid-diagram-viewer svg .mindmap-node circle,
+              .mermaid-diagram-viewer svg .mindmap-node polygon {
+                stroke: #00ff9d !important;
+                stroke-width: 1.5px !important;
+              }
+            `}</style>
             {isGenerating ? (
               <div className="flex flex-col items-center gap-2 text-accent py-12">
                 <Loader2Icon className="size-8 animate-spin" />
@@ -197,7 +227,10 @@ const MermaidDiagram = ({ noteTitle = "", noteContent = "", onInsertToNote }) =>
                 <p className="text-xs opacity-60">Converts your note into interactive Mermaid graphs</p>
               </div>
             ) : (
-              <div ref={containerRef} className="w-full flex justify-center items-center" />
+              <div
+                ref={containerRef}
+                className="mermaid-diagram-viewer w-full flex justify-center items-center"
+              />
             )}
           </div>
 
