@@ -4,6 +4,8 @@ import { Link, useNavigate, useParams } from "react-router";
 import api from "../lib/axios";
 import toast from "react-hot-toast";
 import { ArrowLeftIcon, LoaderIcon, Trash2Icon } from "lucide-react";
+import AICopilot from "../components/AICopilot";
+import AITitleButton from "../components/AITitleButton";
 
 const NoteDetailPage = () => {
   const [note, setNote] = useState(null);
@@ -89,25 +91,46 @@ const NoteDetailPage = () => {
           <div className="card bg-base-100">
             <div className="card-body">
               <div className="form-control mb-4">
-                <label className="label">
-                  <span className="label-text">Title</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="label p-0">
+                    <span className="label-text font-medium">Title</span>
+                  </label>
+                  <AITitleButton
+                    content={note.content}
+                    onTitleGenerated={(newTitle) => setNote({ ...note, title: newTitle })}
+                  />
+                </div>
                 <input
                   type="text"
                   placeholder="Note title"
-                  className="input input-bordered"
+                  className="input input-bordered w-full"
                   value={note.title}
                   onChange={(e) => setNote({ ...note, title: e.target.value })}
                 />
               </div>
 
               <div className="form-control mb-4">
-                <label className="label">
-                  <span className="label-text">Content</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="label p-0">
+                    <span className="label-text font-medium">Content</span>
+                  </label>
+                </div>
+
+                <AICopilot
+                  currentTitle={note.title}
+                  currentContent={note.content}
+                  onApplyContent={(newContent) => setNote({ ...note, content: newContent })}
+                  onAppendContent={(appended) =>
+                    setNote({
+                      ...note,
+                      content: note.content ? `${note.content}\n\n${appended}` : appended,
+                    })
+                  }
+                />
+
                 <textarea
                   placeholder="Write your note here..."
-                  className="textarea textarea-bordered h-32"
+                  className="textarea textarea-bordered h-44 font-sans text-base leading-relaxed"
                   value={note.content}
                   onChange={(e) => setNote({ ...note, content: e.target.value })}
                 />

@@ -3,6 +3,8 @@ import { useState } from "react";
 import toast from "react-hot-toast";
 import { Link, useNavigate } from "react-router";
 import api from "../lib/axios";
+import AICopilot from "../components/AICopilot";
+import AITitleButton from "../components/AITitleButton";
 
 const CreatePage = () => {
   const [title, setTitle] = useState("");
@@ -57,25 +59,43 @@ const CreatePage = () => {
               <h2 className="card-title text-2xl mb-4">Create New Note</h2>
               <form onSubmit={handleSubmit}>
                 <div className="form-control mb-4">
-                  <label className="label">
-                    <span className="label-text">Title</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="label p-0">
+                      <span className="label-text font-medium">Title</span>
+                    </label>
+                    <AITitleButton
+                      content={content}
+                      onTitleGenerated={(newTitle) => setTitle(newTitle)}
+                    />
+                  </div>
                   <input
                     type="text"
-                    placeholder="Note Title"
-                    className="input input-bordered"
+                    placeholder="Note Title (or click 'AI Title' to auto-generate)"
+                    className="input input-bordered w-full"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                   />
                 </div>
 
                 <div className="form-control mb-4">
-                  <label className="label">
-                    <span className="label-text">Content</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="label p-0">
+                      <span className="label-text font-medium">Content</span>
+                    </label>
+                  </div>
+
+                  <AICopilot
+                    currentTitle={title}
+                    currentContent={content}
+                    onApplyContent={(newContent) => setContent(newContent)}
+                    onAppendContent={(appended) =>
+                      setContent((prev) => (prev ? `${prev}\n\n${appended}` : appended))
+                    }
+                  />
+
                   <textarea
-                    placeholder="Write your note here..."
-                    className="textarea textarea-bordered h-32"
+                    placeholder="Write your note here (or use ThinkBoard AI to brainstorm and draft)..."
+                    className="textarea textarea-bordered h-44 font-sans text-base leading-relaxed"
                     value={content}
                     onChange={(e) => setContent(e.target.value)}
                   />
