@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { NetworkIcon, ZoomInIcon, ZoomOutIcon, RotateCcwIcon, ExternalLinkIcon, SparklesIcon } from "lucide-react";
+import {
+  NetworkIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+  RotateCcwIcon,
+  SparklesIcon,
+  RefreshCwIcon,
+} from "lucide-react";
 import api from "../lib/axios";
 
 const NODE_COLORS = [
@@ -14,61 +21,63 @@ const NODE_COLORS = [
 
 const KnowledgeGraph = () => {
   const canvasRef = useRef(null);
-  const [graphData, setGraphData] = useState({ nodes: [], links: [] });
+  const containerRef = useRef(null);
   const [loading, setLoading] = useState(true);
-  const [hoveredNode, setHoveredNode] = useState(null);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [nodeCount, setNodeCount] = useState(0);
+  const [activeTooltip, setActiveTooltip] = useState(null);
   const navigate = useNavigate();
 
-  // Animation and physics simulation state
-  const simulationRef = useRef({
+  // Internal state kept in refs to avoid React re-renders interrupting the Canvas loop
+  const stateRef = useRef({
     nodes: [],
     links: [],
-    animId: null,
+    zoom: 1,
+    pan: { x: 0, y: 0 },
+    hoveredNode: null,
     dragNode: null,
     isPanning: false,
     startPan: { x: 0, y: 0 },
+    hasDragged: false,
+    animId: null,
   });
 
-  // Fetch graph data from backend
+  const fetchGraphData = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get("/ai/knowledge-graph");
+      const data = res.data || { nodes: [], links: [] };
+      setNodeCount(data.nodes?.length || 0);
+      initSimulation(data.nodes || [], data.links || []);
+    } catch (err) {
+      console.error("Failed to load knowledge graph:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchGraph = async () => {
-      setLoading(true);
-      try {
-        const res = await api.get("/ai/knowledge-graph");
-        const data = res.data || { nodes: [], links: [] };
-        setGraphData(data);
-      } catch (err) {
-        console.error("Failed to load knowledge graph:", err);
-      } finally {
-        setLoading(false);
+    fetchGraphData();
+    return () => {
+      if (stateRef.current.animId) {
+        cancelAnimationFrame(stateRef.current.animId);
       }
     };
-
-    fetchGraph();
   }, []);
 
-  // Initialize Canvas physics & render loop
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || graphData.nodes.length === 0) return;
+  const initSimulation = (rawNodes, rawLinks) => {
+    if (!containerRef.current || rawNodes.length === 0) return;
 
-    const ctx = canvas.getContext("2d");
-    const width = canvas.parentElement.clientWidth;
+    const width = containerRef.current.clientWidth || 800;
     const height = 540;
-    canvas.width = width * window.devicePixelRatio;
-    canvas.height = height * window.devicePixelRatio;
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-    // Initialize node positions in a circle/cluster
-    const nodes = graphData.nodes.map((n, i) => {
-      const angle = (i / graphData.nodes.length) * 2 * Math.PI;
+    // Distribute nodes evenly in a circle initially
+    const nodes = rawNodes.map((n, i) => {
+      const angle = (i / rawNodes.length) * 2 * Math.PI;
       const radius = Math.min(width, height) * 0.32;
       return {
         ...n,
-        x: width / 2 + Math.cos(angle) * radius + (Math.random() - 0.5) * 50,
-        y: height / 2 + Math.sin(angle) * radius + (Math.random() - 0.5) * 50,
+        x: width / 2 + Math.cos(angle) * radius + (Math.random() - 0.5) * 40,
+        y: height / 2 + Math.sin(angle) * radius + (Math.random() - 0.5) * 40,
         vx: 0,
         vy: 0,
         radius: 18,
@@ -76,74 +85,116 @@ const KnowledgeGraph = () => {
       };
     });
 
-    const links = graphData.links.map((l) => ({
-      ...l,
-      sourceNode: nodes.find((n) => n.id === l.source) || nodes[0],
-      targetNode: nodes.find((n) => n.id === l.target) || nodes[1],
-    }));
+    const links = rawLinks
+      .map((l) => ({
+        ...l,
+        sourceNode: nodes.find((n) => n.id === l.source),
+        targetNode: nodes.find((n) => n.id === l.target),
+      }))
+      .filter((l) => l.sourceNode && l.targetNode);
 
-    simulationRef.current.nodes = nodes;
-    simulationRef.current.links = links;
+    stateRef.current.nodes = nodes;
+    stateRef.current.links = links;
+    stateRef.current.zoom = 1;
+    stateRef.current.pan = { x: 0, y: 0 };
+    stateRef.current.hoveredNode = null;
+    stateRef.current.dragNode = null;
 
-    // Simulation loop
-    let running = true;
-    const runSimulation = () => {
-      if (!running) return;
+    startLoop();
+  };
 
-      // 1. Apply spring forces for links
+  const startLoop = () => {
+    if (stateRef.current.animId) {
+      cancelAnimationFrame(stateRef.current.animId);
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas || !containerRef.current) return;
+
+    const ctx = canvas.getContext("2d");
+
+    const render = () => {
+      const { nodes, links, zoom, pan, hoveredNode, dragNode } = stateRef.current;
+      const width = containerRef.current?.clientWidth || 800;
+      const height = 540;
+
+      // Adjust canvas resolution for high-DPI screens
+      const dpr = window.devicePixelRatio || 1;
+      if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+      }
+
+      // --- Physics Step ---
+      // 1. Link springs
       for (const link of links) {
         const dx = link.targetNode.x - link.sourceNode.x;
         const dy = link.targetNode.y - link.sourceNode.y;
-        const dist = Math.sqrt(dx * dy + dy * dy) || 1;
-        const targetDist = 140 - (link.similarity || 50) * 0.6;
-        const force = (dist - targetDist) * 0.008;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const targetDist = 160 - (link.similarity || 50) * 0.8;
+        const force = (dist - targetDist) * 0.006;
 
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
 
-        link.sourceNode.vx += fx;
-        link.sourceNode.vy += fy;
-        link.targetNode.vx -= fx;
-        link.targetNode.vy -= fy;
+        if (link.sourceNode !== dragNode) {
+          link.sourceNode.vx += fx;
+          link.sourceNode.vy += fy;
+        }
+        if (link.targetNode !== dragNode) {
+          link.targetNode.vx -= fx;
+          link.targetNode.vy -= fy;
+        }
       }
 
-      // 2. Apply repulsion between all nodes
+      // 2. Node repulsion
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
           const dx = nodes[j].x - nodes[i].x;
           const dy = nodes[j].y - nodes[i].y;
           const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          if (dist < 220) {
-            const force = -(220 - dist) / dist * 0.04;
-            nodes[i].vx += (dx / dist) * force;
-            nodes[i].vy += (dy / dist) * force;
-            nodes[j].vx -= (dx / dist) * force;
-            nodes[j].vy -= (dy / dist) * force;
+          if (dist < 200) {
+            const force = (-(200 - dist) / dist) * 0.035;
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+
+            if (nodes[i] !== dragNode) {
+              nodes[i].vx += fx;
+              nodes[i].vy += fy;
+            }
+            if (nodes[j] !== dragNode) {
+              nodes[j].vx -= fx;
+              nodes[j].vy -= fy;
+            }
           }
         }
       }
 
-      // 3. Center gravity force
+      // 3. Center gravity & velocity dampening
       const cx = width / 2;
       const cy = height / 2;
       for (const node of nodes) {
-        if (node !== simulationRef.current.dragNode) {
-          node.vx += (cx - node.x) * 0.001;
-          node.vy += (cy - node.y) * 0.001;
-          node.vx *= 0.92; // Damping
-          node.vy *= 0.92;
+        if (node !== dragNode) {
+          node.vx += (cx - node.x) * 0.0008;
+          node.vy += (cy - node.y) * 0.0008;
+          node.vx *= 0.90; // Damping
+          node.vy *= 0.90;
           node.x += node.vx;
           node.y += node.vy;
         }
       }
 
-      // 4. Render canvas frame
-      ctx.clearRect(0, 0, width, height);
+      // --- Drawing Step ---
       ctx.save();
-      ctx.translate(pan.x, pan.y);
-      ctx.scale(zoom, zoom);
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, width, height);
 
-      // Draw background grid lines for second-brain cyber aesthetic
+      // Apply Pan & Zoom
+      ctx.translate(width / 2 + pan.x, height / 2 + pan.y);
+      ctx.scale(zoom, zoom);
+      ctx.translate(-width / 2, -height / 2);
+
+      // Background Subtle Cyber Grid
       ctx.strokeStyle = "rgba(255, 255, 255, 0.03)";
       ctx.lineWidth = 1;
       const gridSize = 40;
@@ -160,36 +211,41 @@ const KnowledgeGraph = () => {
         ctx.stroke();
       }
 
-      // Draw links
+      // Draw Links
       for (const link of links) {
-        ctx.beginPath();
-        ctx.moveTo(link.sourceNode.x, link.sourceNode.y);
-        ctx.lineTo(link.targetNode.x, link.targetNode.y);
-
         const isHoveredLink =
           hoveredNode &&
           (link.sourceNode.id === hoveredNode.id || link.targetNode.id === hoveredNode.id);
 
+        ctx.beginPath();
+        ctx.moveTo(link.sourceNode.x, link.sourceNode.y);
+        ctx.lineTo(link.targetNode.x, link.targetNode.y);
+
         ctx.strokeStyle = isHoveredLink
-          ? "rgba(0, 255, 157, 0.7)"
+          ? "rgba(0, 255, 157, 0.85)"
           : "rgba(255, 255, 255, 0.12)";
-        ctx.lineWidth = isHoveredLink ? 2.5 : Math.max(1, (link.value || 1) * 0.8);
+        ctx.lineWidth = isHoveredLink ? 2.5 : 1.2;
         ctx.stroke();
 
-        // Draw similarity tag on hovered links
+        // Draw badge on hovered connected links
         if (isHoveredLink) {
           const midX = (link.sourceNode.x + link.targetNode.x) / 2;
           const midY = (link.sourceNode.y + link.targetNode.y) / 2;
-          ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+          ctx.fillStyle = "rgba(10, 15, 25, 0.9)";
           ctx.fillRect(midX - 16, midY - 9, 32, 18);
+          ctx.strokeStyle = "rgba(0, 255, 157, 0.5)";
+          ctx.lineWidth = 1;
+          ctx.strokeRect(midX - 16, midY - 9, 32, 18);
+
           ctx.fillStyle = "#00FF9D";
           ctx.font = "10px monospace";
           ctx.textAlign = "center";
-          ctx.fillText(`${link.similarity}%`, midX, midY + 3);
+          ctx.textBaseline = "middle";
+          ctx.fillText(`${link.similarity}%`, midX, midY);
         }
       }
 
-      // Draw nodes
+      // Draw Nodes
       for (const node of nodes) {
         const isHovered = hoveredNode && hoveredNode.id === node.id;
         const isConnected =
@@ -200,15 +256,15 @@ const KnowledgeGraph = () => {
               (l.targetNode.id === hoveredNode.id && l.sourceNode.id === node.id)
           );
 
-        // Node outer glow
+        // Node Glow Ring
         if (isHovered || isConnected) {
           ctx.beginPath();
           ctx.arc(node.x, node.y, node.radius + 8, 0, 2 * Math.PI);
-          ctx.fillStyle = isHovered ? "rgba(0, 255, 157, 0.25)" : "rgba(56, 189, 248, 0.2)";
+          ctx.fillStyle = isHovered ? "rgba(0, 255, 157, 0.3)" : "rgba(56, 189, 248, 0.2)";
           ctx.fill();
         }
 
-        // Node Circle Body
+        // Node Body
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius, 0, 2 * Math.PI);
         ctx.fillStyle = node.color;
@@ -221,93 +277,112 @@ const KnowledgeGraph = () => {
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Node Title Label
+        // Node Title Text
         ctx.font = isHovered ? "bold 13px sans-serif" : "11px sans-serif";
         ctx.fillStyle = isHovered ? "#00FF9D" : "rgba(255, 255, 255, 0.85)";
         ctx.textAlign = "center";
-        const truncatedTitle =
-          node.title.length > 18 ? node.title.substring(0, 16) + "…" : node.title;
-        ctx.fillText(truncatedTitle, node.x, node.y + node.radius + 15);
+        ctx.textBaseline = "top";
+        const titleStr =
+          node.title.length > 20 ? node.title.substring(0, 18) + "…" : node.title;
+        ctx.fillText(titleStr, node.x, node.y + node.radius + 6);
       }
 
       ctx.restore();
-      simulationRef.current.animId = requestAnimationFrame(runSimulation);
+      stateRef.current.animId = requestAnimationFrame(render);
     };
 
-    runSimulation();
+    stateRef.current.animId = requestAnimationFrame(render);
+  };
 
-    return () => {
-      running = false;
-      if (simulationRef.current.animId) {
-        cancelAnimationFrame(simulationRef.current.animId);
-      }
-    };
-  }, [graphData, zoom, pan, hoveredNode]);
-
-  // Handle Canvas mouse events (drag, hover, click)
-  const getCanvasCoords = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect();
+  // Convert mouse events to canvas local coordinates (accounting for pan & zoom)
+  const getTransformedCoords = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !containerRef.current) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
     const clientX = e.clientX - rect.left;
     const clientY = e.clientY - rect.top;
-    const x = (clientX - pan.x) / zoom;
-    const y = (clientY - pan.y) / zoom;
+
+    const width = containerRef.current.clientWidth || 800;
+    const height = 540;
+    const { zoom, pan } = stateRef.current;
+
+    const x = (clientX - (width / 2 + pan.x)) / zoom + width / 2;
+    const y = (clientY - (height / 2 + pan.y)) / zoom + height / 2;
+
     return { x, y, clientX, clientY };
   };
 
   const handleMouseDown = (e) => {
-    const { x, y, clientX, clientY } = getCanvasCoords(e);
-    const clickedNode = simulationRef.current.nodes.find(
-      (n) => Math.hypot(n.x - x, n.y - y) <= n.radius + 4
+    const { x, y, clientX, clientY } = getTransformedCoords(e);
+    const clickedNode = stateRef.current.nodes.find(
+      (n) => Math.hypot(n.x - x, n.y - y) <= n.radius + 6
     );
 
+    stateRef.current.hasDragged = false;
+
     if (clickedNode) {
-      simulationRef.current.dragNode = clickedNode;
+      stateRef.current.dragNode = clickedNode;
     } else {
-      simulationRef.current.isPanning = true;
-      simulationRef.current.startPan = { x: clientX - pan.x, y: clientY - pan.y };
+      stateRef.current.isPanning = true;
+      stateRef.current.startPan = {
+        x: clientX - stateRef.current.pan.x,
+        y: clientY - stateRef.current.pan.y,
+      };
     }
   };
 
   const handleMouseMove = (e) => {
-    const { x, y, clientX, clientY } = getCanvasCoords(e);
+    const { x, y, clientX, clientY } = getTransformedCoords(e);
 
-    if (simulationRef.current.dragNode) {
-      simulationRef.current.dragNode.x = x;
-      simulationRef.current.dragNode.y = y;
-      simulationRef.current.dragNode.vx = 0;
-      simulationRef.current.dragNode.vy = 0;
-    } else if (simulationRef.current.isPanning) {
-      setPan({
-        x: clientX - simulationRef.current.startPan.x,
-        y: clientY - simulationRef.current.startPan.y,
-      });
+    if (stateRef.current.dragNode) {
+      stateRef.current.hasDragged = true;
+      stateRef.current.dragNode.x = x;
+      stateRef.current.dragNode.y = y;
+      stateRef.current.dragNode.vx = 0;
+      stateRef.current.dragNode.vy = 0;
+    } else if (stateRef.current.isPanning) {
+      stateRef.current.hasDragged = true;
+      stateRef.current.pan = {
+        x: clientX - stateRef.current.startPan.x,
+        y: clientY - stateRef.current.startPan.y,
+      };
     } else {
-      const found = simulationRef.current.nodes.find(
-        (n) => Math.hypot(n.x - x, n.y - y) <= n.radius + 4
+      const found = stateRef.current.nodes.find(
+        (n) => Math.hypot(n.x - x, n.y - y) <= n.radius + 6
       );
-      setHoveredNode(found || null);
+      stateRef.current.hoveredNode = found || null;
+      setActiveTooltip(found || null);
     }
   };
 
-  const handleMouseUp = () => {
-    simulationRef.current.dragNode = null;
-    simulationRef.current.isPanning = false;
+  const handleMouseUp = (e) => {
+    const { x, y } = getTransformedCoords(e);
+    if (!stateRef.current.hasDragged) {
+      const clickedNode = stateRef.current.nodes.find(
+        (n) => Math.hypot(n.x - x, n.y - y) <= n.radius + 6
+      );
+      if (clickedNode) {
+        navigate(`/note/${clickedNode.id}`);
+      }
+    }
+
+    stateRef.current.dragNode = null;
+    stateRef.current.isPanning = false;
   };
 
-  const handleClick = (e) => {
-    const { x, y } = getCanvasCoords(e);
-    const clickedNode = simulationRef.current.nodes.find(
-      (n) => Math.hypot(n.x - x, n.y - y) <= n.radius + 4
-    );
-    if (clickedNode) {
-      navigate(`/note/${clickedNode.id}`);
-    }
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+    stateRef.current.zoom = Math.min(2.5, Math.max(0.4, stateRef.current.zoom * zoomFactor));
   };
 
   return (
-    <div className="relative w-full rounded-2xl bg-base-300/90 border border-primary/20 shadow-2xl overflow-hidden backdrop-blur-md">
+    <div
+      ref={containerRef}
+      className="relative w-full rounded-2xl bg-base-300/90 border border-primary/20 shadow-2xl overflow-hidden backdrop-blur-md"
+    >
       {/* Header Bar */}
-      <div className="flex items-center justify-between p-4 border-b border-base-content/10 bg-base-200/50">
+      <div className="flex items-center justify-between p-4 border-b border-base-content/10 bg-base-200/60">
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-xl bg-primary/10 text-primary">
             <NetworkIcon className="size-5" />
@@ -315,19 +390,21 @@ const KnowledgeGraph = () => {
           <div>
             <h3 className="font-bold text-base flex items-center gap-2">
               Semantic Knowledge Graph
-              <span className="badge badge-primary badge-sm">Interactive 2D</span>
+              <span className="badge badge-primary badge-sm font-mono">{nodeCount} Notes</span>
             </h3>
             <p className="text-xs opacity-60">
-              Interactive visual map of your thoughts connected by AI semantic similarity
+              Interactive 2D galaxy connected by AI semantic similarity
             </p>
           </div>
         </div>
 
-        {/* Zoom Controls */}
+        {/* Controls */}
         <div className="flex items-center gap-1.5 bg-base-100 p-1 rounded-xl border border-base-content/10">
           <button
             type="button"
-            onClick={() => setZoom((z) => Math.min(2, z + 0.2))}
+            onClick={() => {
+              stateRef.current.zoom = Math.min(2.5, stateRef.current.zoom + 0.25);
+            }}
             className="btn btn-ghost btn-xs btn-circle"
             title="Zoom In"
           >
@@ -335,7 +412,9 @@ const KnowledgeGraph = () => {
           </button>
           <button
             type="button"
-            onClick={() => setZoom((z) => Math.max(0.5, z - 0.2))}
+            onClick={() => {
+              stateRef.current.zoom = Math.max(0.4, stateRef.current.zoom - 0.25);
+            }}
             className="btn btn-ghost btn-xs btn-circle"
             title="Zoom Out"
           >
@@ -344,29 +423,37 @@ const KnowledgeGraph = () => {
           <button
             type="button"
             onClick={() => {
-              setZoom(1);
-              setPan({ x: 0, y: 0 });
+              stateRef.current.zoom = 1;
+              stateRef.current.pan = { x: 0, y: 0 };
             }}
             className="btn btn-ghost btn-xs btn-circle"
             title="Reset View"
           >
             <RotateCcwIcon className="size-3.5" />
           </button>
+          <button
+            type="button"
+            onClick={fetchGraphData}
+            className="btn btn-ghost btn-xs btn-circle text-primary"
+            title="Refresh Graph"
+          >
+            <RefreshCwIcon className="size-3.5" />
+          </button>
         </div>
       </div>
 
-      {/* Canvas Area */}
-      <div className="relative h-[540px] w-full bg-[#0d1117] cursor-grab active:cursor-grabbing">
+      {/* Canvas Viewport */}
+      <div className="relative h-[540px] w-full bg-[#0a0e17] select-none cursor-grab active:cursor-grabbing">
         {loading ? (
-          <div className="absolute inset-0 flex items-center justify-center text-primary gap-2">
-            <SparklesIcon className="size-6 animate-spin" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-primary gap-2">
+            <SparklesIcon className="size-8 animate-spin" />
             <span className="text-sm font-medium">Building semantic knowledge graph...</span>
           </div>
-        ) : graphData.nodes.length === 0 ? (
+        ) : nodeCount === 0 ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-base-content/60">
             <NetworkIcon className="size-12 opacity-30 text-primary mb-2" />
-            <p className="font-medium text-sm">No notes available yet to build graph</p>
-            <p className="text-xs opacity-60">Create notes to see them connected here!</p>
+            <p className="font-medium text-sm">No notes available yet</p>
+            <p className="text-xs opacity-60">Create notes to visualize your knowledge graph!</p>
           </div>
         ) : (
           <canvas
@@ -375,30 +462,33 @@ const KnowledgeGraph = () => {
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
-            onClick={handleClick}
+            onWheel={handleWheel}
           />
         )}
 
-        {/* Hovered Node Preview Tooltip */}
-        {hoveredNode && (
+        {/* Hover Tooltip */}
+        {activeTooltip && (
           <div className="absolute bottom-4 left-4 max-w-sm p-4 rounded-xl bg-base-100/95 border border-primary/40 shadow-2xl backdrop-blur-md animate-fadeIn pointer-events-none">
             <div className="flex items-center justify-between gap-2 mb-1">
-              <h4 className="font-bold text-sm text-primary line-clamp-1">{hoveredNode.title}</h4>
-              <span className="badge badge-xs badge-outline">Click to open</span>
+              <h4 className="font-bold text-sm text-primary line-clamp-1">{activeTooltip.title}</h4>
+              <span className="badge badge-xs badge-outline text-[10px]">Click to open</span>
             </div>
-            <p className="text-xs text-base-content/80 line-clamp-2">{hoveredNode.preview}...</p>
+            <p className="text-xs text-base-content/80 line-clamp-2 leading-relaxed">
+              {activeTooltip.preview}...
+            </p>
           </div>
         )}
 
-        {/* Legend */}
-        <div className="absolute top-4 right-4 bg-base-100/80 backdrop-blur-sm p-2.5 rounded-xl border border-base-content/10 text-[11px] space-y-1 text-base-content/70 hidden sm:block">
-          <div className="flex items-center gap-1.5 font-medium text-base-content">
+        {/* Graph Legend */}
+        <div className="absolute top-4 right-4 bg-base-100/85 backdrop-blur-md p-3 rounded-xl border border-base-content/10 text-[11px] space-y-1 text-base-content/70 hidden sm:block pointer-events-none shadow-lg">
+          <div className="flex items-center gap-1.5 font-semibold text-base-content mb-1">
             <SparklesIcon className="size-3 text-primary" />
-            <span>Graph Guide</span>
+            <span>Graph Interaction</span>
           </div>
-          <p>• Nodes = Notes</p>
-          <p>• Links = Semantic Similarity &gt; 45%</p>
-          <p>• Drag to arrange, click node to open</p>
+          <p>• <span className="text-primary font-medium">Drag node</span> to arrange</p>
+          <p>• <span className="text-primary font-medium">Drag background</span> to pan</p>
+          <p>• <span className="text-primary font-medium">Scroll</span> to zoom in/out</p>
+          <p>• <span className="text-primary font-medium">Click node</span> to open note</p>
         </div>
       </div>
     </div>
